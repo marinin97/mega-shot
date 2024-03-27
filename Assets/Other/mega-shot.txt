@@ -1,0 +1,553 @@
+=================================================================================================================================
+public class BulletParticleController : MonoBehaviour
+{
+    public float Speed;
+
+    private List<Vector3> _points;
+    private ParticleSystem _particleSystem;
+    private float _lifeTime;
+    private float _startTime;
+    
+    void Start()
+    {
+        _particleSystem = this.gameObject.GetComponent<ParticleSystem>();
+        _lifeTime = _particleSystem.main.startLifetime.Evaluate(0);
+
+    }
+
+    private void OnEnable()
+    {
+        _startTime = Time.time;
+    }
+    private void Update()
+    {
+        if (_points.Count > 0)
+        {
+            var emission = _particleSystem.emission;
+            emission.enabled = true;
+            transform.position = Vector3.MoveTowards(transform.position, _points[0], 500f * Time.fixedDeltaTime);
+
+            if (Vector3.Distance(transform.position, _points[0]) < 1)
+            {
+                _points.RemoveAt(0);
+            }
+        }
+        else
+        {
+            var emission = _particleSystem.emission;
+            emission.enabled = false;
+        }
+
+
+        if (Time.time - _startTime > _lifeTime)
+        {
+            Destroy(this.gameObject);
+        }
+
+
+    }
+    public void FollowPoints(List<Vector3> points)
+    {
+        _points = points;
+        transform.position = points[0];
+    }
+}
+=================================================================================================================================
+public class CameraShake : MonoBehaviour
+{
+    public IEnumerator Shake(float duration, float magnitude, float decayFactor)
+    {
+        Vector3 originalPos = transform.localPosition;
+
+        float elapsed = 0.0f;
+
+        while (elapsed < duration)
+        {
+            float x = Random.Range(-1f, 1f) * magnitude;
+            float y = Random.Range(-1f, 1f) * magnitude;
+
+            transform.localPosition = new Vector3(x, y, originalPos.z);
+
+            magnitude *= decayFactor;
+
+            elapsed += Time.deltaTime;
+
+            yield return null;
+        }
+
+        transform.localPosition = originalPos;
+
+    }
+}
+=================================================================================================================================
+public class EnemyController : MonoBehaviour, IKillable
+{
+
+    private Rigidbody2D _rigidbody;
+    private AudioSource _audioSource;   
+
+    [SerializeField] private float _movementSpeed;
+    private void Start()
+    {
+        _rigidbody = GetComponent<Rigidbody2D>();
+        _audioSource = GetComponent<AudioSource>();        
+    }
+
+    private void FixedUpdate()
+    {
+        if (PlayerController.Instance != null)
+        {
+            _rigidbody.MovePosition(Vector3.MoveTowards(transform.position, PlayerController.Instance.transform.position, _movementSpeed * Time.deltaTime));
+            float angle = Mathf.Atan2(PlayerController.Instance.transform.position.y - transform.position.y, PlayerController.Instance.transform.position.x - transform.position.x) * Mathf.Rad2Deg;
+
+            _rigidbody.rotation = angle;
+        }
+    }
+    public void Kill()
+    {
+        Instantiate(GameController.Instance.DeathParticles, transform.position, Quaternion.identity);
+        gameObject.SetActive(false);
+
+    }
+
+    public void OnCollisionEnter2D(Collision2D collision)
+    {
+        if (collision.collider.CompareTag("Player"))
+        {
+            IKillable player = collision.gameObject.GetComponent<IKillable>();
+            player.Kill();
+            GameController.Instance.EndText.text = "Game Over! Your score: " + GameController.Instance.ScoreForKillEnemy.ToString(); 
+            GameController.Instance.InfoText.text = "Press [SPACE] to restart";
+            GameController.Instance.GameEnded = true;
+        }
+    }
+}
+=================================================================================================================================
+public class GameController : MonoBehaviour
+{
+    public static GameController Instance;
+    public bool GameEnded { get; set; }
+
+    public GameObject DeathParticles;
+    public GameObject ShootParticles;
+    public CameraShake ShakeScript;
+    public float SpawnRadius;
+    public TMP_Text EndText;
+    public TMP_Text ScoreText;
+    public TMP_Text InfoText;
+
+    internal int ScoreForKillEnemy = 0;
+
+    private void Awake()
+    {
+        Instance = this;
+    }
+    void Start()
+    {
+        if (ObjectPooler.SharedInstance?.GetPooledObject("Reflector") != null)
+        {
+            GameObject obj = ObjectPooler.SharedInstance.GetPooledObject("Reflector");
+            obj.transform.rotation = Quaternion.Euler(0, 0, GetRandomAngle());
+            obj.transform.position = GetRandomPosition();
+            obj.SetActive(true);
+        }
+        ScoreText.text = "Kills: " + ScoreForKillEnemy.ToString();
+    }
+
+    private void Update()
+    {
+        if (GameEnded)
+        {
+            Destroy(ScoreText);
+        }
+        ScoreText.text = "Kills: " + ScoreForKillEnemy.ToString();
+        if (Random.value <= 0.01)
+        {
+            if (ObjectPooler.SharedInstance.GetPooledObject("Reflector") != null)
+            {
+                GameObject obj = ObjectPooler.SharedInstance.GetPooledObject("Reflector");
+                obj.transform.rotation = Quaternion.Euler(0, 0, GetRandomAngle());
+
+
+                obj.transform.position = GetRandomPosition();
+                obj.SetActive(true);
+            }
+        }
+
+        if (Random.value <= 0.01)
+        {
+            if (ObjectPooler.SharedInstance.GetPooledObject("Enemy") != null)
+            {
+                GameObject obj = ObjectPooler.SharedInstance.GetPooledObject("Enemy");
+                obj.transform.position = GetRandomPosition();
+                obj.SetActive(true);
+            }
+        }
+
+        RestartGame();
+    }
+
+    private float GetRandomAngle()
+    {
+        float output = ((int)(Random.value * 360) / 45) * 45;
+        return output;
+    }
+
+    private Vector3 GetRandomPosition()
+    {
+
+        Vector3 output = new Vector3(Random.value * 20 - 10, Random.value * 16 - 8, 0);
+
+        while (true)
+        {
+            bool ValidPosition = true;
+            output = new Vector3(Random.value * 20 - 10, Random.value * 16 - 8, 0);
+
+
+            for (int i = 0; i < ObjectPooler.SharedInstance.GetTotalPoolSize(); i++)
+            {
+                if (!DistanceCheck(output, ObjectPooler.SharedInstance.GetPooledObject(i).transform.position))
+                {
+                    ValidPosition = false;
+                }
+            }
+
+            if (ValidPosition)
+            {
+                break;
+            }
+        }
+        return output;
+    }
+
+    private bool DistanceCheck(Vector3 currentPos, Vector3 targetPos)
+    {
+        if (Vector3.Distance(currentPos, targetPos) < SpawnRadius)
+        {
+            return false;
+        }
+        else
+        {
+            return true;
+        }
+    }
+    private void RestartGame()
+    {
+        if (GameEnded && Input.GetKeyDown(KeyCode.Space))
+        {
+            SceneManager.LoadScene(0);
+        }
+    }
+}
+=================================================================================================================================
+public interface IKillable
+{
+    public void Kill();
+}
+
+public interface IDamageable
+{
+    public void Damage(int damage);
+}
+=================================================================================================================================
+[System.Serializable]
+public class ObjectPoolItem
+{
+    public GameObject ObjectToPool;
+    public GameObject Parent;
+    public int AmountToPool;
+    public bool ShouldExpand;
+
+    [HideInInspector]
+    public List<GameObject> PooledObjects; // Добавлен список для хранения объектов
+}
+
+public class ObjectPooler : MonoBehaviour
+{
+    public static ObjectPooler SharedInstance;
+    public List<ObjectPoolItem> itemsToPool;
+
+    private Dictionary<string, List<GameObject>> pooledObjects;
+
+    private void Awake()
+    {
+        if (SharedInstance != null) Destroy(gameObject);
+        SharedInstance = this;
+        InitializePools();
+    }
+
+    private void InitializePools()
+    {
+        pooledObjects = new Dictionary<string, List<GameObject>>();
+
+        foreach (ObjectPoolItem item in itemsToPool)
+        {
+            item.PooledObjects = new List<GameObject>(); // Инициализация списка объектов
+
+            for (int i = 0; i < item.AmountToPool; i++)
+            {
+                GameObject obj = Instantiate(item.ObjectToPool);
+                obj.transform.parent = item.Parent.transform;
+                obj.SetActive(false);
+                item.PooledObjects.Add(obj); // Добавление объекта в список
+            }
+
+            pooledObjects.Add(item.ObjectToPool.tag, item.PooledObjects); // Добавление списка в словарь по тегу
+        }
+    }
+
+    public GameObject GetPooledObject(string tag)
+    {
+        if (pooledObjects.ContainsKey(tag))
+        {
+            List<GameObject> pool = pooledObjects[tag];
+
+            for (int i = 0; i < pool.Count; i++)
+            {
+                if (!pool[i].activeInHierarchy)
+                {
+                    return pool[i];
+                }
+            }
+
+            foreach (ObjectPoolItem item in itemsToPool)
+            {
+                if (item.ObjectToPool.tag == tag)
+                {
+                    if (item.ShouldExpand)
+                    {
+                        GameObject obj = Instantiate(item.ObjectToPool);
+                        obj.SetActive(false);
+                        item.PooledObjects.Add(obj);
+                        return obj;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    public GameObject GetPooledObject(int index)
+    {
+        if (index >= 0 && index < itemsToPool.Count)
+        {
+            return itemsToPool[index].PooledObjects[0];
+        }
+
+        return null;
+    }
+
+    public int GetSize()
+    {
+        return itemsToPool.Count;
+    }
+
+    public int GetTotalPoolSize()
+    {
+        return pooledObjects.Count;
+    }
+
+    public int GetItemPoolSize(string tag)
+    {
+        return pooledObjects.ContainsKey(tag) ? pooledObjects[tag].Count : 0;
+    }
+}
+=================================================================================================================================
+public class PlayerController : MonoBehaviour, IKillable
+{   
+        public static PlayerController Instance;
+    public float Speed;
+    public CameraShake ShakeScript;
+
+    private Rigidbody2D RigidBody;
+    private GameObject LookPivot;
+    private LineRenderer AimLaser;
+
+
+    private void Awake()
+    {
+        Instance = this;
+    }
+
+    private void Start()
+    {
+        RigidBody = GetComponent<Rigidbody2D>();
+        LookPivot = transform.GetChild(0).gameObject;
+        AimLaser = GetComponent<LineRenderer>();
+    }
+
+    private void Update()
+    {
+        Move();
+        Look();
+        if (Input.GetMouseButtonDown(0))
+        {
+            Shoot(LookPivot.transform.GetChild(0).transform.position, LookPivot.transform.right);
+        }
+
+        DrawLaser(LookPivot.transform.GetChild(0).transform.position, LookPivot.transform.right, 5, 1);
+
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            Kill();
+        }
+    }
+
+    private void Move()
+    {
+        float horizontal = Input.GetAxisRaw("Horizontal");
+        float vertical = Input.GetAxisRaw("Vertical");
+
+        Vector2 netVelocity = new Vector2(horizontal, vertical);
+        float speedMultiplier = Input.GetKey(KeyCode.LeftShift) ? 0.3f : 1f;
+        RigidBody.velocity = netVelocity.normalized * Speed * speedMultiplier;
+    }
+
+    private void Look()
+    {
+        Vector3 mousePos = Camera.main.ScreenToWorldPoint(Input.mousePosition);
+        Vector3 lookPos = mousePos - transform.position;
+        float angle = Mathf.Atan2(lookPos.y, lookPos.x) * Mathf.Rad2Deg;
+
+        Transform lookTransform = LookPivot.GetComponent<Transform>();
+        lookTransform.localScale = new Vector3(1, angle > 90 || angle < -90 ? -1 : 1);
+        lookTransform.rotation = Quaternion.AngleAxis(angle, Vector3.forward);
+    }
+
+    private void Shoot(Vector3 startPos, Vector3 rotation)
+    {
+        RaycastHit2D hit = Physics2D.Raycast(startPos, rotation);
+        if (hit && Vector3.Distance(startPos, hit.point) < 0.1f)
+        {
+            return;
+        }
+        GetComponent<AudioSource>().Play();
+        StartCoroutine(ShakeScript.Shake(.1f, .3f, .8f));
+        List<Vector3> points = new List<Vector3> { startPos };
+        Shoot(startPos, rotation, points, 0);
+    }
+
+    private void Shoot(Vector3 startPos, Vector3 rotation, List<Vector3> points, int reflections)
+    {
+        RaycastHit2D hit = Physics2D.Raycast(startPos, rotation);
+        if (hit)
+        {
+            points.Add(hit.point);
+            if (hit.collider.CompareTag("Reflector"))
+            {
+                IDamageable obj = hit.collider.GetComponent<WallController>();
+                obj.Damage(1);
+                Shoot(hit.point + hit.normal * 0.01f, Vector3.Reflect(rotation, hit.normal), points, reflections + 1);
+            }
+            else if (hit.collider.CompareTag("Enemy") && reflections > 0)
+            {
+                DrawShootEffect(points);
+                IKillable obj = hit.collider.GetComponent<EnemyController>();
+                obj.Kill();
+                GameController.Instance.ScoreForKillEnemy++;
+            }
+            else
+            {
+                DrawShootEffect(points);
+            }
+        }
+    }
+
+    private void DrawLaser(Vector3 startPos, Vector3 rotation, int reflections, int index)
+    {
+        AimLaser.SetPosition(index - 1, startPos);
+        RaycastHit2D hit = Physics2D.Raycast(startPos, rotation);
+        if (hit)
+        {
+            if (AimLaser.positionCount <= index)
+            {
+                AimLaser.positionCount += 1;
+            }
+
+            if (AimLaser.positionCount - index > 1)
+            {
+                AimLaser.positionCount -= 1;
+            }
+            AimLaser.SetPosition(index - 1, startPos);
+            AimLaser.SetPosition(index, hit.point);
+
+            if (hit.collider.CompareTag("Reflector") && reflections > 0)
+            {
+                DrawLaser(hit.point + hit.normal * 0.01f, Vector3.Reflect(rotation, hit.normal), reflections - 1, index + 1);
+            }
+        }
+    }
+
+    private void DrawShootEffect(List<Vector3> points)
+    {
+        GameObject emitter = Instantiate(GameController.Instance.ShootParticles);
+        if (emitter)
+        {
+            emitter.SetActive(true);
+            emitter.GetComponent<BulletParticleController>().FollowPoints(points);
+        }
+    }
+
+    public void Kill()
+    {
+        Instantiate(GameController.Instance.DeathParticles, transform.position, Quaternion.identity);
+        gameObject.SetActive(false);
+    }
+}
+=================================================================================================================================
+public class WallController : MonoBehaviour, IKillable, IDamageable
+{
+    public int BaseHealth;
+    public List<Sprite> Sprites;
+
+    private int _health;
+    private SpriteRenderer _spriteRenderer;
+
+    private void Start()
+    {
+        _health = BaseHealth;
+        _spriteRenderer = GetComponent<SpriteRenderer>();
+    }
+
+    private void OnEnable()
+    {
+        _health = BaseHealth;
+    }
+
+    private void Update()
+    {
+        if (_health <= 0)
+        {
+            Kill();
+
+        }
+    }
+
+    public void Kill()
+    {
+        this.gameObject.SetActive(false);
+        _health = BaseHealth;
+        _spriteRenderer.sprite = Sprites[_health];
+    }
+
+    public void Damage(int damage)
+    {
+        _health -= damage;
+        if (_health > 0)
+        {
+            _spriteRenderer.sprite = Sprites[_health];
+        }
+
+    }
+}
+=================================================================================================================================
+
+=================================================================================================================================
+
+=================================================================================================================================
+
+=================================================================================================================================
+
+=================================================================================================================================
+
